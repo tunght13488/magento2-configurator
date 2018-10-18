@@ -2,16 +2,17 @@
 
 namespace CtiDigital\Configurator\Component;
 
-use CtiDigital\Configurator\Exception\ComponentException;
 use CtiDigital\Configurator\Api\LoggerInterface;
+use CtiDigital\Configurator\Exception\ComponentException;
 use Magento\Catalog\Model\Product;
+use Magento\Eav\Model\AttributeRepository;
 use Magento\Eav\Setup\EavSetup;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\ObjectManagerInterface;
-use Magento\Eav\Model\AttributeRepository;
 
 /**
  * Class Attributes
+ *
  * @package CtiDigital\Configurator\Model\Component
  * @SuppressWarnings(PHPMD.LongVariable)
  */
@@ -58,7 +59,7 @@ class Attributes extends YamlComponentAbstract
         'filterable' => 'is_filterable',
         'user_defined' => 'is_user_defined',
         'default' => 'default_value',
-        'used_for_promo_rules' => 'is_used_for_promo_rules'
+        'used_for_promo_rules' => 'is_used_for_promo_rules',
     ];
 
     /**
@@ -66,7 +67,7 @@ class Attributes extends YamlComponentAbstract
      */
     protected $skipCheck = [
         'option',
-        'used_in_forms'
+        'used_in_forms',
     ];
 
     /**
@@ -92,7 +93,12 @@ class Attributes extends YamlComponentAbstract
     {
         try {
             foreach ($attributeConfigurationData['attributes'] as $attributeCode => $attributeConfiguration) {
-                $this->processAttribute($attributeCode, $attributeConfiguration);
+                $merge = false;
+                if (array_key_exists('merge', $attributeConfiguration)) {
+                    $merge = !!$attributeConfiguration['merge'];
+                    unset($attributeConfiguration['merge']);
+                }
+                $this->processAttribute($attributeCode, $attributeConfiguration, $merge);
             }
         } catch (ComponentException $e) {
             $this->log->logError($e->getMessage());
@@ -101,9 +107,10 @@ class Attributes extends YamlComponentAbstract
 
     /**
      * @param $attributeCode
-     * @param $attributeConfig
+     * @param array $attributeConfig
+     * @param bool $merge
      */
-    protected function processAttribute($attributeCode, array $attributeConfig)
+    protected function processAttribute($attributeCode, array $attributeConfig, $merge = false)
     {
         $updateAttribute = true;
         $attributeExists = false;
@@ -129,14 +136,21 @@ class Attributes extends YamlComponentAbstract
                 $attributeConfig['apply_to'] = implode(',', $attributeConfig['product_types']);
             }
 
-            $this->eavSetup->addAttribute(
-                $this->entityTypeId,
-                $attributeCode,
-                $attributeConfig
-            );
+            if ($attributeExists && $merge) {
+                foreach ($attributeConfig as $property => $value) {
+                    $this->eavSetup->updateAttribute($this->entityTypeId, $attributeCode, $property, $value);
+                }
+            } else {
+                $this->eavSetup->addAttribute(
+                    $this->entityTypeId,
+                    $attributeCode,
+                    $attributeConfig
+                );
+            }
 
             if ($attributeExists) {
                 $this->log->logInfo(sprintf('Attribute %s updated.', $attributeCode));
+
                 return;
             }
 
@@ -197,6 +211,7 @@ class Attributes extends YamlComponentAbstract
         if (isset($this->attributeConfigMap[$name])) {
             return $this->attributeConfigMap[$name];
         }
+
         return $name;
     }
 
@@ -219,13 +234,14 @@ class Attributes extends YamlComponentAbstract
         }
 
         // Loop through existing attributes options
-        $existingAttributeOptions = array();
+        $existingAttributeOptions = [];
         foreach ($attributeOptions as $attributeOption) {
             $value = $attributeOption->getLabel();
             $existingAttributeOptions[] = $value;
         }
 
         $optionsToAdd = array_diff($option['values'], $existingAttributeOptions);
+
         //$optionsToRemove = array_diff($existingAttributeOptions, $option['values']);
 
         return $optionsToAdd;
